@@ -105,7 +105,11 @@ transcribe-rs = { version = "0.3.3", features = ["whisper-metal"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk-layer-shell = { version = "0.8", features = ["v0_6"] }
 gtk = "0.18"
-transcribe-rs = { version = "0.3.3", features = ["whisper-vulkan"] }
+# Vulkan disabled for the Linux build: whisper-rs 0.16's Vulkan backend imports
+# ggml_backend_vk_* symbols the bundled whisper.cpp no longer exports (build breaks),
+# and WSL has no GPU passthrough. CPU whisper (whisper-cpp) + ONNX/Parakeet are provided
+# by the base `transcribe-rs` dependency in [dependencies] above.
+transcribe-rs = { version = "0.3.8", features = ["whisper-cpp", "onnx"] }
 
 [patch.crates-io]
 tauri-runtime = { git = "https://github.com/cjpais/tauri.git", branch = "handy-2.10.2" }

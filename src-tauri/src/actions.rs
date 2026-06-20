@@ -141,6 +141,47 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
         _ => (None, None),
     };
 
+    // Anthropic uses its native Messages API (different request body + response
+    // shape than the OpenAI-compatible /chat/completions path). Route it through a
+    // dedicated client so the cleanup instructions become the `system` prompt and the
+    // raw transcript becomes the user message. Other providers are unaffected.
+    if provider.id == "anthropic" {
+        const ANTHROPIC_MAX_TOKENS: u32 = 4096;
+        let system_prompt = build_system_prompt(&prompt);
+        let user_content = transcription.to_string();
+
+        return match crate::llm_client::send_anthropic_message(
+            &provider,
+            api_key,
+            &model,
+            Some(system_prompt),
+            user_content,
+            ANTHROPIC_MAX_TOKENS,
+        )
+        .await
+        {
+            Ok(Some(content)) => {
+                let content = strip_invisible_chars(&content);
+                debug!(
+                    "Anthropic post-processing succeeded. Output length: {} chars",
+                    content.len()
+                );
+                Some(content)
+            }
+            Ok(None) => {
+                error!("Anthropic API response has no text content");
+                None
+            }
+            Err(e) => {
+                error!(
+                    "Anthropic post-processing failed: {}. Falling back to original transcription.",
+                    e
+                );
+                None
+            }
+        };
+    }
+
     if provider.supports_structured_output {
         debug!("Using structured outputs for provider '{}'", provider.id);
 
