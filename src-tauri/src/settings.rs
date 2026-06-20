@@ -10,6 +10,13 @@ use tauri_plugin_store::StoreExt;
 pub const APPLE_INTELLIGENCE_PROVIDER_ID: &str = "apple_intelligence";
 pub const APPLE_INTELLIGENCE_DEFAULT_MODEL_ID: &str = "Apple Intelligence";
 
+pub const ANTHROPIC_PROVIDER_ID: &str = "anthropic";
+/// Cheapest Anthropic model — used as the default for the Anthropic provider.
+pub const ANTHROPIC_DEFAULT_MODEL_ID: &str = "claude-haiku-4-5";
+
+/// Id of the default "Voice Cleanup" post-processing prompt.
+pub const DEFAULT_VOICE_CLEANUP_PROMPT_ID: &str = "default_voice_cleanup";
+
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
@@ -624,6 +631,9 @@ fn default_model_for_provider(provider_id: &str) -> String {
     if provider_id == APPLE_INTELLIGENCE_PROVIDER_ID {
         return APPLE_INTELLIGENCE_DEFAULT_MODEL_ID.to_string();
     }
+    if provider_id == ANTHROPIC_PROVIDER_ID {
+        return ANTHROPIC_DEFAULT_MODEL_ID.to_string();
+    }
     String::new()
 }
 
@@ -638,12 +648,38 @@ fn default_post_process_models() -> HashMap<String, String> {
     map
 }
 
+/// System prompt for the "Voice Cleanup" post-processing preset. Written to be used
+/// as the `system` prompt (the raw transcript is sent as the user message), so it
+/// contains no `${output}` placeholder.
+const VOICE_CLEANUP_PROMPT: &str = r#"You are a voice dictation cleanup engine. The user dictated by voice and a speech-to-text system produced a raw, messy transcript. Your job is to recover the message the user actually intended to say and output only that cleaned text.
+
+Apply these corrections:
+1. Remove stammering, false starts, and self-corrections. When the speaker restarts or corrects themselves (e.g. "send it to- no, give it to Maria"), keep only the final intended version ("give it to Maria").
+2. Remove filler words and verbal tics: um, uh, er, ah, like (as filler), you know, I mean, sort of, kind of, and their equivalents in whatever language the transcript is in.
+3. Remove transcribed non-speech noises and artifacts: coughs, throat-clearing, "[inaudible]", laughter, background-noise words, and stray single syllables that are clearly not part of the message.
+4. Remove off-topic interjections and cross-talk that are clearly not from the main speaker — e.g. another person's voice that bled into the recording, or a side remark to someone else in the room — when context makes clear they are not part of the intended dictation.
+5. Fix punctuation, capitalization, and obvious word-level transcription errors so the result reads as clean, natural writing.
+
+Strict rules:
+- Preserve the original meaning, intent, tone, and level of detail. Do NOT add information, do NOT answer questions in the text, do NOT summarize, and do NOT paraphrase beyond what removing disfluencies requires.
+- Preserve the original language. If the dictation is in Spanish, French, etc., the cleaned output must stay in that same language.
+- Keep the speaker's own wording and word order wherever possible; only reorder when a self-correction requires it.
+- When unsure whether something is an error or intended, keep it. Bias toward preserving the speaker's words.
+- Output ONLY the cleaned transcript text. No preamble, no quotation marks, no explanations, no notes, no markdown."#;
+
 fn default_post_process_prompts() -> Vec<LLMPrompt> {
-    vec![LLMPrompt {
-        id: "default_improve_transcriptions".to_string(),
-        name: "Improve Transcriptions".to_string(),
-        prompt: "Clean this transcript:\n1. Fix spelling, capitalization, and punctuation errors\n2. Convert number words to digits (twenty-five → 25, ten percent → 10%, five dollars → $5)\n3. Replace spoken punctuation with symbols (period → ., comma → ,, question mark → ?)\n4. Remove filler words (um, uh, like as filler)\n5. Keep the language in the original version (if it was french, keep it in french for example)\n\nPreserve exact meaning and word order. Do not paraphrase or reorder content.\n\nReturn only the cleaned transcript.\n\nTranscript:\n${output}".to_string(),
-    }]
+    vec![
+        LLMPrompt {
+            id: "default_improve_transcriptions".to_string(),
+            name: "Improve Transcriptions".to_string(),
+            prompt: "Clean this transcript:\n1. Fix spelling, capitalization, and punctuation errors\n2. Convert number words to digits (twenty-five → 25, ten percent → 10%, five dollars → $5)\n3. Replace spoken punctuation with symbols (period → ., comma → ,, question mark → ?)\n4. Remove filler words (um, uh, like as filler)\n5. Keep the language in the original version (if it was french, keep it in french for example)\n\nPreserve exact meaning and word order. Do not paraphrase or reorder content.\n\nReturn only the cleaned transcript.\n\nTranscript:\n${output}".to_string(),
+        },
+        LLMPrompt {
+            id: DEFAULT_VOICE_CLEANUP_PROMPT_ID.to_string(),
+            name: "Voice Cleanup".to_string(),
+            prompt: VOICE_CLEANUP_PROMPT.to_string(),
+        },
+    ]
 }
 
 fn default_whisper_gpu_device() -> i32 {
@@ -798,7 +834,7 @@ pub fn get_default_settings() -> AppSettings {
         post_process_api_keys: default_post_process_api_keys(),
         post_process_models: default_post_process_models(),
         post_process_prompts: default_post_process_prompts(),
-        post_process_selected_prompt_id: None,
+        post_process_selected_prompt_id: Some(DEFAULT_VOICE_CLEANUP_PROMPT_ID.to_string()),
         mute_while_recording: false,
         append_trailing_space: false,
         app_language: default_app_language(),
@@ -956,6 +992,26 @@ mod tests {
         let settings = get_default_settings();
         assert!(!settings.auto_submit);
         assert_eq!(settings.auto_submit_key, AutoSubmitKey::Enter);
+    }
+
+    #[test]
+    fn anthropic_defaults_use_haiku_and_voice_cleanup() {
+        let models = default_post_process_models();
+        assert_eq!(
+            models.get(ANTHROPIC_PROVIDER_ID).map(String::as_str),
+            Some(ANTHROPIC_DEFAULT_MODEL_ID)
+        );
+
+        let prompts = default_post_process_prompts();
+        assert!(prompts
+            .iter()
+            .any(|p| p.id == DEFAULT_VOICE_CLEANUP_PROMPT_ID));
+
+        let settings = get_default_settings();
+        assert_eq!(
+            settings.post_process_selected_prompt_id.as_deref(),
+            Some(DEFAULT_VOICE_CLEANUP_PROMPT_ID)
+        );
     }
 
     #[test]

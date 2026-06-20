@@ -216,6 +216,117 @@ pub async fn send_chat_completion_with_schema(
         .and_then(|choice| choice.message.content.clone()))
 }
 
+// ─────────────────────────── Anthropic Messages API ───────────────────────────
+// Anthropic's native API (https://api.anthropic.com/v1/messages) uses a different
+// request/response shape than the OpenAI-compatible /chat/completions path above:
+// the prompt instructions go in a top-level `system` field, `max_tokens` is required,
+// and the response is a list of typed content blocks rather than `choices`. This is
+// deliberately NOT an OpenAI-compatible shim.
+
+#[derive(Debug, Serialize)]
+struct AnthropicMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AnthropicMessagesRequest {
+    model: String,
+    max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<String>,
+    messages: Vec<AnthropicMessage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicContentBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    #[serde(default)]
+    text: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicMessagesResponse {
+    content: Vec<AnthropicContentBlock>,
+}
+
+/// Concatenate the text of every `text` content block in an Anthropic response.
+fn extract_anthropic_text(blocks: Vec<AnthropicContentBlock>) -> String {
+    blocks
+        .into_iter()
+        .filter(|block| block.block_type == "text")
+        .filter_map(|block| block.text)
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+/// Send a request to Anthropic's native Messages API (`POST {base_url}/messages`).
+///
+/// `system_prompt` becomes the top-level `system` field and `user_content` becomes
+/// the single user message. Returns `Ok(Some(text))` with the concatenated text
+/// blocks, `Ok(None)` if the response carried no text, or `Err` on HTTP/parse failure.
+///
+/// Reuses [`create_client`], which already sets the `x-api-key` + `anthropic-version`
+/// headers for the `anthropic` provider.
+pub async fn send_anthropic_message(
+    provider: &PostProcessProvider,
+    api_key: String,
+    model: &str,
+    system_prompt: Option<String>,
+    user_content: String,
+    max_tokens: u32,
+) -> Result<Option<String>, String> {
+    let base_url = provider.base_url.trim_end_matches('/');
+    let url = format!("{}/messages", base_url);
+
+    debug!("Sending Anthropic Messages API request to: {}", url);
+
+    let client = create_client(provider, &api_key)?;
+
+    let request_body = AnthropicMessagesRequest {
+        model: model.to_string(),
+        max_tokens,
+        system: system_prompt.filter(|s| !s.trim().is_empty()),
+        messages: vec![AnthropicMessage {
+            role: "user".to_string(),
+            content: user_content,
+        }],
+    };
+
+    let response = client
+        .post(&url)
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Failed to read error response".to_string());
+        return Err(format!(
+            "Anthropic API request failed with status {}: {}",
+            status, error_text
+        ));
+    }
+
+    let parsed: AnthropicMessagesResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Anthropic API response: {}", e))?;
+
+    let text = extract_anthropic_text(parsed.content);
+
+    if text.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(text))
+    }
+}
+
 /// Fetch available models from an OpenAI-compatible API
 /// Returns a list of model IDs
 pub async fn fetch_models(
@@ -274,4 +385,37 @@ pub async fn fetch_models(
     }
 
     Ok(models)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_anthropic_text_concatenates_text_blocks_only() {
+        let blocks = vec![
+            AnthropicContentBlock {
+                block_type: "text".to_string(),
+                text: Some("Hola ".to_string()),
+            },
+            AnthropicContentBlock {
+                block_type: "thinking".to_string(),
+                text: Some("(should be ignored)".to_string()),
+            },
+            AnthropicContentBlock {
+                block_type: "text".to_string(),
+                text: Some("mundo".to_string()),
+            },
+        ];
+        assert_eq!(extract_anthropic_text(blocks), "Hola mundo");
+    }
+
+    #[test]
+    fn extract_anthropic_text_empty_when_no_text_blocks() {
+        let blocks = vec![AnthropicContentBlock {
+            block_type: "tool_use".to_string(),
+            text: None,
+        }];
+        assert_eq!(extract_anthropic_text(blocks), "");
+    }
 }
