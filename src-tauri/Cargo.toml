@@ -88,7 +88,11 @@ tauri-plugin-single-instance = "2.3.2"
 tauri-plugin-updater = "2.10.0"
 
 [target.'cfg(windows)'.dependencies]
-transcribe-rs = { version = "0.3.3", features = ["whisper-vulkan", "ort-directml"] }
+# whisper-cpp (CPU) instead of whisper-vulkan: whisper-rs 0.16's Vulkan backend
+# imports ggml_backend_vk_* symbols the bundled whisper.cpp no longer exports, which
+# breaks the build (same issue as Linux). ort-directml keeps GPU acceleration for the
+# ONNX/Parakeet engine (the recommended default) on Windows.
+transcribe-rs = { version = "0.3.8", features = ["whisper-cpp", "ort-directml"] }
 windows = { version = "0.61.3", features = [
   "Win32_Media_Audio_Endpoints",
   "Win32_System_Com_StructuredStorage",
