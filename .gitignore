@@ -42,3 +42,9 @@ blob-report/
 
 # Nix build output
 result
+
+# Local secrets — never commit
+key.txt
+*.key
+.env
+.env.*
