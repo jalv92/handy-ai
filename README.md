@@ -6,6 +6,8 @@
 
 Handy is a cross-platform desktop application that provides simple, privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field. This happens on your own computer without sending any information to the cloud.
 
+> **This is a fork of [cjpais/Handy](https://github.com/cjpais/Handy) that adds optional [AI Voice Cleanup](#ai-voice-cleanup-this-fork).** It uses the Anthropic API (Claude Haiku) to rewrite your raw dictation into what you actually meant — removing stammering, filler words, false starts, and stray noise — while keeping your language and meaning. Transcription itself stays 100% local; only the optional cleanup step calls the API.
+
 ## Why Handy?
 
 Handy was created to fill the gap for a truly open source, extensible speech-to-text tool. As stated on [handy.computer](https://handy.computer):
@@ -32,22 +34,34 @@ The process is entirely local:
   - **Parakeet V3** - CPU-optimized model with excellent performance and automatic language detection
 - Works on Windows, macOS, and Linux
 
-## Quick Start
+## Download & Install
 
-### Installation
+Grab the latest installer for your OS from the **[Releases page](https://github.com/jalv92/handy-ai/releases/latest)**, then:
 
-1. Download the latest release from the [releases page](https://github.com/cjpais/Handy/releases) or the [website](https://handy.computer)
-   - **macOS**: Also available via [Homebrew cask](https://formulae.brew.sh/cask/handy): `brew install --cask handy`
-   - **Windows**: Also available via [winget](https://github.com/microsoft/winget-pkgs): `winget install cjpais.Handy` \
-     **Note:** The Homebrew cask and winget package are not maintained by the Handy developers.
-2. Install the application
-3. Launch Handy and grant necessary system permissions (microphone, accessibility)
-4. Configure your preferred keyboard shortcuts in Settings
-5. Start transcribing!
+| OS | File to download | How to install |
+| --- | --- | --- |
+| **Windows** (x64) | `Handy_<version>_x64_en-US.msi` | Double-click the `.msi`. This is an unsigned community build, so Windows SmartScreen shows a warning → click **More info → Run anyway**, then follow the installer. |
+| **Linux** (x64 · Debian/Ubuntu) | `Handy_<version>_amd64.deb` | `sudo apt install ./Handy_<version>_amd64.deb` |
+| **macOS** | — | Build from source (see [Build from source](#build-from-source) below). |
 
-### Development Setup
+Then launch **Handy**, grant microphone/accessibility permissions when asked, set your shortcut in **Settings**, and start transcribing.
 
-For detailed build instructions including platform-specific requirements, see [BUILD.md](BUILD.md).
+### Build from source
+
+Prefer to build it yourself (required for macOS)? See [BUILD.md](BUILD.md) for the base steps, plus the fork-specific notes in [BUILD-WINDOWS-NOTES.md](BUILD-WINDOWS-NOTES.md) and [BUILD-LINUX-NOTES.md](BUILD-LINUX-NOTES.md). A GitHub Actions workflow (`.github/workflows/build-windows.yml`) also builds the Windows installers on demand.
+
+## AI Voice Cleanup (this fork)
+
+The optional AI cleanup step sends your raw transcript to the Anthropic API (Claude Haiku — the cheapest model) and pastes back a cleaned version: stammering, filler words, false starts, self-corrections, transcribed coughs and stray cross-talk removed, while your language and meaning are preserved. The model only sees text (never audio), so noise removal is best-effort, and on any API error Handy falls back to the raw transcript.
+
+It is an **experimental** feature, hidden by default. To enable it:
+
+1. **Settings → Advanced → Experimental** — turn it on.
+2. A **Post-Processing** toggle appears — turn it on. A **Post-Processing** entry now shows in the sidebar.
+3. Open **Post-Processing** → set Provider to **Anthropic** and paste your [Anthropic API key](https://console.anthropic.com/). The model (`claude-haiku-4-5`) and the **Voice Cleanup** prompt are preselected.
+4. Bind the **"Transcribe with Post-Processing"** shortcut.
+
+Now hold that shortcut, speak, release — and the cleaned-up text is pasted. Your API key is stored locally in Handy's settings and is never committed to the repo.
 
 ## Integrations
 
